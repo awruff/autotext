@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "autotext",
-  "version": "0.1.0",
-  "name": "AutoText",
+  "id": "${mod_id}",
+  "version": "${mod_version}",
+  "name": "${mod_name}",
   "description": "Send a saved chat message or command with one key press.",
   "authors": [
-    "idk yet"
+    "Polyfrost", "anolithme"
   ],
   "license": "AGPL-3.0-or-later",
   "icon": "assets/autotext/icon.png",
@@ -19,9 +19,9 @@
     ]
   },
   "depends": {
-    "fabricloader": ">=0.19.3",
-    "minecraft": "1.21.11",
-    "oneconfigv1": ">=1.1.4 <2.0.0",
-    "fabric-language-kotlin": ">=1.13.8+kotlin.2.3.0"
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "${minecraft_version_range}",
+    "oneconfigv1": ">=${oneconfig_version}",
+    "fabric-language-kotlin": "*"
   }
 }

@@ -14,7 +14,7 @@ object MacroCodec {
     const val MAX_PAYLOAD_LENGTH = 1_048_576
     const val MAX_MACROS = 100
     const val MAX_ID_LENGTH = 128
-    const val MAX_NAME_LENGTH = 48
+    private const val LEGACY_MAX_NAME_LENGTH = 48
     const val MAX_TEXT_LENGTH = 1024
     const val MAX_BINDING_INPUTS = 16
     const val MAX_KEY_CODE = 512
@@ -28,7 +28,6 @@ object MacroCodec {
         root.add("macros", JsonArray().apply {
             macros.forEach { macro ->
                 require(macro.id.length <= MAX_ID_LENGTH) { "Macro ID is too long" }
-                require(macro.name.length <= MAX_NAME_LENGTH) { "Macro name is too long" }
                 require(macro.text.length <= MAX_TEXT_LENGTH) { "Macro text is too long" }
                 require(macro.binding.keys.size <= MAX_BINDING_INPUTS) { "Too many keys in a binding" }
                 require(macro.binding.mouseButtons.size <= MAX_BINDING_INPUTS) { "Too many mouse buttons in a binding" }
@@ -38,7 +37,6 @@ object MacroCodec {
 
                 add(JsonObject().apply {
                     addProperty("id", macro.id)
-                    addProperty("name", macro.name)
                     addProperty("text", macro.text)
                     addProperty("enabled", macro.enabled)
                     addProperty("delivery", macro.delivery.name)
@@ -80,9 +78,6 @@ object MacroCodec {
         val id = obj.stringOrDefault("id", "").also {
             require(it.length <= MAX_ID_LENGTH) { "Macro ID is too long" }
         }
-        val name = obj.stringOrDefault("name", "New macro").also {
-            require(it.length <= MAX_NAME_LENGTH) { "Macro name is too long" }
-        }
         val text = obj.stringOrDefault("text", "").also {
             require(it.length <= MAX_TEXT_LENGTH) { "Macro text is too long" }
         }
@@ -91,7 +86,6 @@ object MacroCodec {
 
         MacroDefinition(
             id = id,
-            name = name,
             text = text,
             enabled = obj.booleanOrDefault("enabled", false),
             delivery = obj.optionalString("delivery")?.let(MacroDelivery::valueOf) ?: MacroDelivery.PREFILL,
@@ -144,7 +138,7 @@ object MacroCodec {
         while (reader.hasNext()) {
             when (val name = reader.nextName()) {
                 "id" -> if (!fields.add(name) || !readBoundedString(reader, MAX_ID_LENGTH)) return false
-                "name" -> if (!fields.add(name) || !readBoundedString(reader, MAX_NAME_LENGTH)) return false
+                "name" -> if (!fields.add(name) || !readBoundedString(reader, LEGACY_MAX_NAME_LENGTH)) return false
                 "text" -> if (!fields.add(name) || !readBoundedString(reader, MAX_TEXT_LENGTH)) return false
                 "enabled" -> {
                     if (!fields.add(name) || reader.peek() != JsonToken.BOOLEAN) return false

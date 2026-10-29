@@ -1,19 +1,26 @@
 package org.polyfrost.autotext.core
 
-import java.net.IDN
-import java.util.Locale
+import org.polyfrost.oneconfig.api.hypixel.v1.HypixelUtils
 
 object ServerPolicy {
-    fun isHypixelHost(rawHost: String?): Boolean {
-        val host = rawHost?.substringBeforeLast(':', rawHost)?.trim()?.trimEnd('.')
-            ?.takeIf { it.isNotEmpty() } ?: return false
-        val ascii = runCatching { IDN.toASCII(host) }.getOrDefault(host).lowercase(Locale.ROOT)
-        return ascii == "hypixel.net" || ascii.endsWith(".hypixel.net")
+    private val chatCommands = setOf(
+        "ac", "achat", "pc", "pchat", "gc", "gchat", "oc", "ochat", "cc", "coopchat",
+        "msg", "message", "tell", "w", "whisper", "r", "reply", "shout",
+    )
+    private val chatSubcommands = mapOf(
+        "p" to setOf("chat"),
+        "party" to setOf("chat"),
+        "g" to setOf("chat", "officer", "officerchat", "o"),
+        "guild" to setOf("chat", "officer", "officerchat", "o"),
+    )
+
+    fun blocksImmediateSend(rawBrand: String?): Boolean =
+        HypixelUtils.isHypixel() || rawBrand.isNullOrBlank()
+
+    fun sendsChat(payload: MacroPayload): Boolean {
+        if (payload !is MacroPayload.Command) return true
+        val args = payload.value.lowercase().split(' ')
+        val name = args[0].substringAfter(':')
+        return name in chatCommands || args.getOrNull(1) in chatSubcommands[name].orEmpty()
     }
-
-    fun isHypixelBrand(rawBrand: String?): Boolean =
-        rawBrand?.trim()?.lowercase(Locale.ROOT)?.contains("hypixel") ?: false
-
-    fun blocksImmediateSend(rawHost: String?, rawBrand: String?, strongerSignal: Boolean = false): Boolean =
-        strongerSignal || isHypixelHost(rawHost) || rawBrand.isNullOrBlank() || isHypixelBrand(rawBrand)
 }

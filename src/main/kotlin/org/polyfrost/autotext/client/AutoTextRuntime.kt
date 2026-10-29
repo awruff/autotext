@@ -1,10 +1,11 @@
 package org.polyfrost.autotext.client
 
 import java.util.concurrent.atomic.AtomicBoolean
-import net.minecraft.client.MinecraftClient
-import net.minecraft.client.network.ServerAddress
-import org.lwjgl.glfw.GLFW
+import com.mojang.blaze3d.platform.InputConstants
+import net.minecraft.client.Minecraft
 import org.polyfrost.autotext.core.*
+import org.polyfrost.oneconfig.api.event.v1.eventHandler
+import org.polyfrost.oneconfig.api.event.v1.events.MouseInputEvent
 import org.polyfrost.oneconfig.api.notifications.v1.Notifications
 import org.polyfrost.oneconfig.api.platform.v1.Platform
 import org.polyfrost.oneconfig.api.ui.v1.keybind.KeybindManager
@@ -19,6 +20,8 @@ object AutoTextRuntime {
     private var observedRevision = Long.MIN_VALUE
     private var registrationEpoch = 0L
     private var reconciledDownKeysCache: Set<Int>? = null
+    private val pendingMousePresses = HashSet<Int>()
+    private var tickMousePresses: Set<Int> = emptySet()
 
     private val modifierKeyCodes: Set<Int> by lazy {
         val keys = Platform.compatibility().keys()
@@ -30,13 +33,19 @@ object AutoTextRuntime {
         ).filterTo(LinkedHashSet()) { it >= 0 }
     }
 
-    fun initialize() = refreshBindings()
+    fun initialize() {
+        eventHandler { (button, state): MouseInputEvent ->
+            if (state == MouseInputEvent.PRESSED && Platform.screen().current<Any>() == null) {
+                pendingMousePresses += button
+            }
+        }
+        refreshBindings()
+    }
 
     fun refreshBindings() {
-        val client = MinecraftClient.getInstance()
-        if (!client.isOnThread) {
+        if (!isClientThread()) {
             if (refreshQueued.compareAndSet(false, true)) {
-                client.execute {
+                runOnClientThread {
                     refreshQueued.set(false)
                     refreshBindingsNow()
                 }
@@ -49,10 +58,9 @@ object AutoTextRuntime {
     fun conflicts(): Set<String> = conflictingIds
 
     fun syncIfChanged() {
-        val client = MinecraftClient.getInstance()
-        if (!client.isOnThread) {
+        if (!isClientThread()) {
             if (refreshQueued.compareAndSet(false, true)) {
-                client.execute {
+                runOnClientThread {
                     refreshQueued.set(false)
                     syncIfChangedNow()
                 }
@@ -66,16 +74,17 @@ object AutoTextRuntime {
 
     fun beginTick() {
         reconciledDownKeysCache = null
+        tickMousePresses = if (pendingMousePresses.isEmpty()) emptySet() else pendingMousePresses.toSet()
+        pendingMousePresses.clear()
         executor.beginTick()
     }
 
     fun onProfileChanged() {
-        val client = MinecraftClient.getInstance()
         val applyChange = {
             executor.clearSession()
             refreshBindingsNow()
         }
-        if (client.isOnThread) applyChange() else client.execute { applyChange() }
+        if (isClientThread()) applyChange() else runOnClientThread(applyChange)
     }
 
     private fun refreshBindingsNow() {
@@ -117,27 +126,26 @@ object AutoTextRuntime {
             refreshBindingsNow()
             return
         }
-        val client = MinecraftClient.getInstance()
-        val connection = client.networkHandler
-        val host = client.currentServerEntry?.address?.let { raw ->
-            runCatching { ServerAddress.parse(raw).address }.getOrNull()
-        }
+        val client = Minecraft.getInstance()
+        //? if = 1.8.9 {
+        /*val connected = client.networkHandler != null
+        val brand = client.player?.serverBrand
+        *///?} else {
+        val connected = client.connection != null
+        val brand = client.connection?.serverBrand()
+        //?}
         val context = MacroContext(
             client.player != null,
-            connection != null,
+            connected,
             Platform.screen().current<Any>() != null,
-            ServerPolicy.blocksImmediateSend(host, connection?.brand, oneConfigReportsHypixel()),
+            ServerPolicy.blocksImmediateSend(brand),
         )
-        notifyBlocked(executor.trigger(
-            macro, context, AutoTextConfig.enabled, id in conflictingIds,
-            AutoTextConfig.cooldownMillis.toLong(),
-        ))
+        notifyBlocked(executor.trigger(macro, context, AutoTextConfig.enabled, id in conflictingIds))
     }
 
     private fun notifyBlocked(result: TriggerResult) {
-        if (!AutoTextConfig.blockedActionNotifications) return
         val message = when (result) {
-            TriggerResult.BLOCKED_SERVER -> "Immediate AutoText actions are disabled on this server. Use Prefill instead."
+            TriggerResult.BLOCKED_SERVER -> "Sending chat messages immediately is disabled on this server. Use Prefill instead."
             TriggerResult.INVALID -> "This macro has no valid message or command."
             TriggerResult.CONFLICTING_BIND -> "Two enabled macros use the same keybind."
             else -> return
@@ -145,7 +153,7 @@ object AutoTextRuntime {
         val now = System.currentTimeMillis()
         if (now - lastBlockedNoticeAt < 2000L) return
         lastBlockedNoticeAt = now
-        Notifications.info("AutoText action blocked", message)
+        Notifications.info("Auto Text action blocked", message)
     }
 
     private fun findConflicts(macros: List<MacroDefinition>): Set<String> {
@@ -165,20 +173,12 @@ object AutoTextRuntime {
         }
     }
 
-    private fun oneConfigReportsHypixel(): Boolean = runCatching {
-        val cls = Class.forName("org.polyfrost.oneconfig.api.hypixel.v1.HypixelUtils")
-        cls.getMethod("isHypixel").invoke(null) == true
-    }.getOrDefault(false)
-
     private fun reconciledDownKeys(trackedDownKeys: Set<Int>, trackedDownMouse: Set<Int>): Set<Int> {
         reconciledDownKeysCache?.let { return it }
         if (trackedDownKeys.isEmpty() && trackedDownMouse.isEmpty()) {
             return emptySet<Int>().also { reconciledDownKeysCache = it }
         }
-        val window = Platform.compatibility().windowHandle()
-        val physicalModifiersDown = modifierKeyCodes.filterTo(LinkedHashSet()) {
-            GLFW.glfwGetKey(window, it) == GLFW.GLFW_PRESS
-        }
+        val physicalModifiersDown = modifierKeyCodes.filterTo(LinkedHashSet(), ::isKeyDown)
         return reconcilePhysicalModifiers(
             trackedDownKeys, trackedDownMouse, modifierKeyCodes, physicalModifiersDown,
         ).also { reconciledDownKeysCache = it }
@@ -190,7 +190,9 @@ object AutoTextRuntime {
     ) : OneConfigKeybind(keyCodes, mouseBtns, mods, durationNanos, action) {
         private val releaseGate = KeybindReleaseGate()
 
-        override fun test(downKeys: Set<Int>, downMouse: Set<Int>, currentMods: Byte): Boolean {
+        override fun test(downKeys: Set<Int>, trackedDownMouse: Set<Int>, currentMods: Byte): Boolean {
+            // OneConfig only checks binds once per tick, so a click released before the tick ends is never seen as down
+            val downMouse = if (tickMousePresses.isEmpty()) trackedDownMouse else trackedDownMouse + tickMousePresses
             val actualDownKeys = reconciledDownKeys(downKeys, downMouse)
             val inputsDown = bindingInputsDown(keyCodes, mouseBtns, actualDownKeys, downMouse)
             val screenOpen = Platform.screen().current<Any>() != null
@@ -206,4 +208,25 @@ object AutoTextRuntime {
                 it.defaultKeybind = defaultKeybind
             }
     }
+
+    private fun isClientThread(): Boolean =
+        //? if = 1.8.9 {
+        /*Minecraft.getInstance().isOnSameThread
+        *///?} else
+        Minecraft.getInstance().isSameThread
+
+    private fun runOnClientThread(action: () -> Unit) {
+        //? if = 1.8.9 {
+        /*Minecraft.getInstance().executeTask(Runnable(action))
+        *///?} else
+        Minecraft.getInstance().execute(action)
+    }
+
+    private fun isKeyDown(key: Int): Boolean =
+        //? if >= 26.3 || = 1.8.9 {
+        /*InputConstants.isKeyDown(key)
+        *///?} elif >= 1.21.10 {
+        InputConstants.isKeyDown(Minecraft.getInstance().window, key)
+        //?} else
+        /*InputConstants.isKeyDown(Platform.compatibility().windowHandle(), key)*/
 }

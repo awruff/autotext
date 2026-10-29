@@ -10,22 +10,15 @@ import org.polyfrost.oneconfig.api.config.v1.ConfigManager
 import org.polyfrost.oneconfig.api.config.v1.Properties
 import org.polyfrost.oneconfig.api.config.v1.Property
 import org.polyfrost.oneconfig.api.config.v1.Tree
-import org.polyfrost.oneconfig.api.config.v1.Visualizer.SliderVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.SwitchVisualizer
 
 object AutoTextConfig : Config(
-    "autotext.json", "assets/autotext/autotext_dark.svg", "AutoText", Category.QOL,
+    "autotext.json", "assets/autotext/autotext_dark.svg", "Auto Text", Category.QOL,
 ) {
     private val logger = LogManager.getLogger("AutoText/Config")
 
     @JvmField @Volatile
     var enabled = true
-
-    @JvmField @Volatile
-    var cooldownMillis = 750f
-
-    @JvmField @Volatile
-    var blockedActionNotifications = true
 
     @JvmField @Volatile
     var macrosJson = "{\"version\":1,\"macros\":[]}"
@@ -40,7 +33,6 @@ object AutoTextConfig : Config(
     @Volatile private var activePropertyOwner: Any? = null
 
     const val MAX_MACROS = 100
-    const val MAX_NAME_LENGTH = 48
 
     override fun initialize(byConfigManager: Boolean) {
         if (byConfigManager) {
@@ -75,17 +67,8 @@ object AutoTextConfig : Config(
         return Tree(id, null, null, null).apply {
             put(ownedProperty(
                 owner, "enabled", "Enabled",
-                "Allow configured AutoText shortcuts to run. Immediate sending is disabled on Hypixel; Prefill still works.",
+                "Turn all macros on or off. On Hypixel, chat messages and chat commands like /pc or /msg can only be prefilled.",
                 Boolean::class.javaObjectType, { enabled }, { enabled = it },
-            ).metadata("visualizer", SwitchVisualizer::class.java))
-            put(ownedProperty(
-                owner, "cooldownMillis", "Cooldown", "Minimum time between uses of the same macro.",
-                Float::class.javaObjectType, { cooldownMillis }, { cooldownMillis = it },
-            ).metadata("visualizer", SliderVisualizer::class.java)
-                .metadata("min", 250f).metadata("max", 5000f).metadata("step", 50f))
-            put(ownedProperty(
-                owner, "blockedActionNotifications", "Blocked-action notifications", "Show why a shortcut was blocked.",
-                Boolean::class.javaObjectType, { blockedActionNotifications }, { blockedActionNotifications = it },
             ).metadata("visualizer", SwitchVisualizer::class.java))
             put(ownedProperty(
                 owner, "macrosJson", type = String::class.java,
@@ -121,7 +104,7 @@ object AutoTextConfig : Config(
     }
 
     internal fun editorSettings(expectedTree: Tree): List<Property<*>> =
-        listOf("enabled", "cooldownMillis", "blockedActionNotifications").map { id ->
+        listOf("enabled").map { id ->
             requireNotNull(expectedTree.getProp(id)) { "AutoText config is missing property $id" }
         }
 
@@ -178,7 +161,7 @@ object AutoTextConfig : Config(
             if (!canMutateLocked() || payloadState.macros.size >= MAX_MACROS) {
                 return@withConfigStateLocks null
             }
-            val macro = MacroDefinition(name = nextMacroNameLocked())
+            val macro = MacroDefinition()
             added = macro
             publishLocked(payloadState.macros + macro, true, true)
         }
@@ -186,14 +169,11 @@ object AutoTextConfig : Config(
         return added
     }
 
-    fun deleteMacroIfEditorRevision(id: String, expectedRevision: Long): Boolean {
+    fun deleteMacro(id: String): Boolean {
         val publication = withConfigStateLocks {
             syncExternallyChangedPayloadLocked()
-            val accepted = acceptsEditorMutation(
-                payloadState.editorRevision, expectedRevision, payloadState.healthy,
-                profileRebinding, payloadState.byId.containsKey(id),
-            )
-            if (!accepted) null else publishLocked(payloadState.macros.filterNot { it.id == id }, true, true)
+            if (!canMutateLocked() || !payloadState.byId.containsKey(id)) null
+            else publishLocked(payloadState.macros.filterNot { it.id == id }, true, true)
         } ?: return false
         finishPublication(publication)
         return true
@@ -209,9 +189,7 @@ object AutoTextConfig : Config(
             val index = payloadState.macros.indexOfFirst { it.id == id }
             if (index < 0) return@withConfigStateLocks null
             val source = payloadState.macros[index]
-            val copy = source.deepCopy(
-                UUID.randomUUID().toString(), truncateUtf16Safely(source.name + " copy", MAX_NAME_LENGTH),
-            ).apply {
+            val copy = source.deepCopy(UUID.randomUUID().toString()).apply {
                 enabled = false
                 binding = MacroBinding()
             }
@@ -313,8 +291,6 @@ object AutoTextConfig : Config(
     private fun resetBackingFieldsLocked() {
         val previous = payloadState
         enabled = true
-        cooldownMillis = 750f
-        blockedActionNotifications = true
         macrosJson = "{\"version\":1,\"macros\":[]}"
         macrosBackupJson = ""
         payloadState = PayloadState(
@@ -330,7 +306,6 @@ object AutoTextConfig : Config(
             source.deepCopy().apply {
                 id = id.takeIf { it.isNotBlank() && it.length <= 128 && usedIds.add(it) }
                     ?: generateSequence { UUID.randomUUID().toString() }.first { usedIds.add(it) }
-                name = truncateUtf16Safely(name, MAX_NAME_LENGTH)
                 text = truncateUtf16Safely(text, 1024)
                 binding = MacroBinding(
                     binding.keys.asSequence().filter { it in 1..512 }.distinct().take(16).toList().toIntArray(),
@@ -339,11 +314,6 @@ object AutoTextConfig : Config(
                 )
             }
         }
-    }
-
-    private fun nextMacroNameLocked(): String {
-        val used = payloadState.macros.mapTo(HashSet()) { it.name }
-        return generateSequence(1) { it + 1 }.map { "Macro $it" }.first { it !in used }
     }
 
     private fun canMutateLocked(): Boolean = !profileRebinding && payloadState.healthy
@@ -443,7 +413,7 @@ private fun sameMacroOrder(first: List<MacroDefinition>, second: List<MacroDefin
     first.size == second.size && first.indices.all { first[it].id == second[it].id }
 
 private fun sameMacroValue(first: MacroDefinition, second: MacroDefinition): Boolean =
-    first.id == second.id && first.name == second.name && first.text == second.text &&
+    first.id == second.id && first.text == second.text &&
         first.enabled == second.enabled && first.delivery == second.delivery &&
         first.binding.modifiers == second.binding.modifiers &&
         first.binding.keys.contentEquals(second.binding.keys) &&
@@ -452,10 +422,6 @@ private fun sameMacroValue(first: MacroDefinition, second: MacroDefinition): Boo
 internal fun acceptsEditGeneration(
     currentGeneration: Long, expectedGeneration: Long, healthy: Boolean, profileRebinding: Boolean,
 ): Boolean = healthy && !profileRebinding && currentGeneration == expectedGeneration
-
-internal fun acceptsEditorMutation(
-    currentRevision: Long, expectedRevision: Long, healthy: Boolean, profileRebinding: Boolean, containsMacro: Boolean,
-): Boolean = healthy && !profileRebinding && containsMacro && currentRevision == expectedRevision
 
 internal fun truncateUtf16Safely(value: String, maxLength: Int): String {
     require(maxLength >= 0) { "maxLength must not be negative" }
