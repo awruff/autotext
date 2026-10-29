@@ -13,7 +13,7 @@ import org.polyfrost.oneconfig.api.config.v1.Tree
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.SwitchVisualizer
 
 object AutoTextConfig : Config(
-    "autotext.json", "assets/autotext/autotext_dark.svg", "Auto Text", Category.QOL,
+    "autotext.json", "assets/autotext/autotext_dark.svg", "autotext.name", Category.QOL,
 ) {
     private val logger = LogManager.getLogger("AutoText/Config")
 
@@ -22,9 +22,6 @@ object AutoTextConfig : Config(
 
     @JvmField @Volatile
     var macrosJson = "{\"version\":1,\"macros\":[]}"
-
-    @JvmField @Volatile
-    var macrosBackupJson = ""
 
     private val payloadLock = Any()
     @Volatile private var payloadState = PayloadState()
@@ -66,17 +63,12 @@ object AutoTextConfig : Config(
         }
         return Tree(id, null, null, null).apply {
             put(ownedProperty(
-                owner, "enabled", "Enabled",
-                "Turn all macros on or off. On Hypixel, chat messages and chat commands like /pc or /msg can only be prefilled.",
+                owner, "enabled", "autotext.enabled", "autotext.enabled.description",
                 Boolean::class.javaObjectType, { enabled }, { enabled = it },
             ).metadata("visualizer", SwitchVisualizer::class.java))
             put(ownedProperty(
                 owner, "macrosJson", type = String::class.java,
                 getter = { macrosJson }, setter = { macrosJson = it },
-            ).metadata("hidden", true))
-            put(ownedProperty(
-                owner, "macrosBackupJson", type = String::class.java,
-                getter = { macrosBackupJson }, setter = { macrosBackupJson = it },
             ).metadata("hidden", true))
         }
     }
@@ -96,11 +88,6 @@ object AutoTextConfig : Config(
     internal fun runtimeSnapshot(): RuntimeSnapshot = synchronized(payloadLock) {
         syncExternallyChangedPayloadLocked()
         RuntimeSnapshot(payloadState.runtimeRevision, payloadState.macros.map { it.deepCopy() })
-    }
-
-    internal fun isMacroPayloadHealthy(): Boolean = synchronized(payloadLock) {
-        syncExternallyChangedPayloadLocked()
-        payloadState.healthy
     }
 
     internal fun editorSettings(expectedTree: Tree): List<Property<*>> =
@@ -139,7 +126,7 @@ object AutoTextConfig : Config(
         val publication = withConfigStateLocks {
             syncExternallyChangedPayloadLocked()
             val canCommit = acceptsEditGeneration(
-                payloadState.generation, draft.generation, payloadState.healthy, profileRebinding,
+                payloadState.generation, draft.generation, profileRebinding,
             )
             if (!canCommit) return@withConfigStateLocks null
             val values = payloadState.macros.toMutableList()
@@ -215,17 +202,6 @@ object AutoTextConfig : Config(
         finishPublication(publication)
     }
 
-    fun resetBrokenMacroPayload(): Boolean {
-        val publication = withConfigStateLocks {
-            syncExternallyChangedPayloadLocked()
-            if (profileRebinding || payloadState.healthy) return@withConfigStateLocks null
-            macrosBackupJson = macrosJson
-            publishLocked(emptyList(), true, true)
-        } ?: return false
-        finishPublication(publication)
-        return true
-    }
-
     private fun publishLocked(
         values: List<MacroDefinition>, saveImmediately: Boolean, rebuildEditor: Boolean,
     ): Publication {
@@ -236,9 +212,9 @@ object AutoTextConfig : Config(
         val structureChanged = !sameMacroOrder(previous.macros, owned)
         macrosJson = encoded
         payloadState = PayloadState(
-            owned, owned.associateBy { it.id }, encoded, true,
+            owned, owned.associateBy { it.id }, encoded,
             previous.generation + 1,
-            previous.editorRevision + if (rebuildEditor || structureChanged || !previous.healthy) 1 else 0,
+            previous.editorRevision + if (rebuildEditor || structureChanged) 1 else 0,
             previous.runtimeRevision + if (runtimeChanged) 1 else 0,
         )
         val token = if (saveImmediately) SaveToken(payloadState.generation, tree) else null
@@ -265,23 +241,14 @@ object AutoTextConfig : Config(
     private fun loadPayloadLocked(raw: String, canonicalize: Boolean, forceRuntimeRevision: Boolean): Boolean {
         val previous = payloadState
         val decoded = MacroCodec.decode(raw)
-        if (!decoded.valid) {
-            val runtimeChanged = forceRuntimeRevision || previous.macros.isNotEmpty()
-            payloadState = PayloadState(
-                loadedPayload = raw, healthy = false,
-                generation = previous.generation + 1,
-                editorRevision = previous.editorRevision + 1,
-                runtimeRevision = previous.runtimeRevision + if (runtimeChanged) 1 else 0,
-            )
-            logger.error("Could not read the saved macro list; keeping the original payload untouched")
-            return runtimeChanged
-        }
+        if (!decoded.valid) logger.error("Could not read the saved macro list; starting with an empty one")
 
-        val normalized = normalize(decoded.macros)
-        val storedPayload = if (canonicalize) MacroCodec.encode(normalized).also { macrosJson = it } else raw
+        val normalized = if (decoded.valid) normalize(decoded.macros) else emptyList()
+        val storedPayload =
+            if (canonicalize || !decoded.valid) MacroCodec.encode(normalized).also { macrosJson = it } else raw
         val runtimeChanged = forceRuntimeRevision || !runtimeShapeEquals(previous.macros, normalized)
         payloadState = PayloadState(
-            normalized, normalized.associateBy { it.id }, storedPayload, true,
+            normalized, normalized.associateBy { it.id }, storedPayload,
             previous.generation + 1, previous.editorRevision + 1,
             previous.runtimeRevision + if (runtimeChanged) 1 else 0,
         )
@@ -292,7 +259,6 @@ object AutoTextConfig : Config(
         val previous = payloadState
         enabled = true
         macrosJson = "{\"version\":1,\"macros\":[]}"
-        macrosBackupJson = ""
         payloadState = PayloadState(
             generation = previous.generation + 1,
             editorRevision = previous.editorRevision + 1,
@@ -316,7 +282,7 @@ object AutoTextConfig : Config(
         }
     }
 
-    private fun canMutateLocked(): Boolean = !profileRebinding && payloadState.healthy
+    private fun canMutateLocked(): Boolean = !profileRebinding
 
     private inline fun <T> withConfigStateLocks(action: () -> T): T =
         synchronized(ConfigManager::class.java) { synchronized(payloadLock) { action() } }
@@ -386,7 +352,6 @@ object AutoTextConfig : Config(
         val macros: List<MacroDefinition> = emptyList(),
         val byId: Map<String, MacroDefinition> = emptyMap(),
         val loadedPayload: String = "{\"version\":1,\"macros\":[]}",
-        val healthy: Boolean = true,
         val generation: Long = 0,
         val editorRevision: Long = 0,
         val runtimeRevision: Long = 0,
@@ -420,8 +385,8 @@ private fun sameMacroValue(first: MacroDefinition, second: MacroDefinition): Boo
         first.binding.mouseButtons.contentEquals(second.binding.mouseButtons)
 
 internal fun acceptsEditGeneration(
-    currentGeneration: Long, expectedGeneration: Long, healthy: Boolean, profileRebinding: Boolean,
-): Boolean = healthy && !profileRebinding && currentGeneration == expectedGeneration
+    currentGeneration: Long, expectedGeneration: Long, profileRebinding: Boolean,
+): Boolean = !profileRebinding && currentGeneration == expectedGeneration
 
 internal fun truncateUtf16Safely(value: String, maxLength: Int): String {
     require(maxLength >= 0) { "maxLength must not be negative" }

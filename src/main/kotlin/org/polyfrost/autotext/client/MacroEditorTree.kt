@@ -12,12 +12,11 @@ import org.polyfrost.oneconfig.api.config.v1.Properties
 import org.polyfrost.oneconfig.api.config.v1.Property
 import org.polyfrost.oneconfig.api.config.v1.Tree
 import org.polyfrost.oneconfig.api.config.v1.Visualizer
-import org.polyfrost.oneconfig.api.config.v1.Visualizer.ButtonVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.DropdownVisualizer
-import org.polyfrost.oneconfig.api.config.v1.Visualizer.InfoVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.KeybindVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.SwitchVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.TextVisualizer
+import org.polyfrost.oneconfig.api.platform.v1.Platform
 import org.polyfrost.oneconfig.api.ui.v1.keybind.OneConfigKeybind
 import org.polyfrost.oneconfig.internal.ui.api.ConfigRegistry
 import org.polyfrost.oneconfig.internal.ui.api.ConfigSource
@@ -27,7 +26,7 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 internal object MacroEditorTree {
-    private const val KEYBIND_CATEGORY = "Macros"
+    private const val KEYBIND_CATEGORY = "autotext.macros"
     private const val NO_MC_MIRROR = "oc_no_mc_mirror"
     private var installedTree: Tree? = null
     private var installedRevision = Long.MIN_VALUE
@@ -65,32 +64,10 @@ internal object MacroEditorTree {
         }
         AutoTextConfig.editorSettings(configTree).forEach { root.put(it) }
 
-        if (!AutoTextConfig.isMacroPayloadHealthy()) {
-            root.put(
-                info(
-                    "macro_storage_error",
-                    "Macro list could not be loaded",
-                    "Your saved macros haven't been touched. Only reset if you want to start over with an empty list."
-                )
-            )
-            root.put(
-                action(
-                    "reset_macro_storage",
-                    "Reset macro list",
-                    "Back up the unreadable data, then start with an empty macro list.",
-                    "Back up and reset",
-                    "refresh"
-                ) {
-                    if (AutoTextConfig.resetBrokenMacroPayload()) syncRegistry()
-                }
-            )
-            return root
-        }
-
         val rows = AutoTextConfig.snapshot().map(::buildRow)
         rows.forEach { root.put(it.keybind) }
         root.put(
-            Properties.dummy("macros", "Macros", "Each macro sends a chat message, or runs a command if it starts with /.")
+            Properties.dummy("macros", "autotext.macros", "autotext.macros.description")
                 .metadata("visualizer", MacroList.visualizer)
                 .metadata(MacroList.ROWS, rows)
         )
@@ -99,14 +76,14 @@ internal object MacroEditorTree {
 
     private fun buildRow(snapshot: MacroDefinition): MacroRow {
         val id = snapshot.id
-        val liveKeybindTitle = LiveText(keybindTitle(snapshot.text))
+        val liveKeybindTitle = LiveText(keybindPreview(snapshot.text))
         val enabledState = mutableStateOf(snapshot.enabled)
         var editorBind = snapshot.binding.toOneConfigKeybind()
         return MacroRow(
             id = id,
             enabledState = enabledState,
             enabled = functional(
-                "enabled", "Enabled", null, Boolean::class.javaObjectType,
+                "enabled", null, null, Boolean::class.javaObjectType,
                 getter = { current(id)?.enabled == true },
                 setter = { enabled ->
                     enabledState.value = enabled
@@ -115,26 +92,25 @@ internal object MacroEditorTree {
                 visualizer = SwitchVisualizer::class.java
             ),
             text = functional(
-                "text", "Text",
-                "Start with / to run a command. Saves up to 1024 characters, but anything over 256 won't run.",
+                "text", null, null,
                 String::class.java,
                 getter = { current(id)?.text ?: "" },
                 setter = { value ->
-                    liveKeybindTitle.value = keybindTitle(value)
+                    liveKeybindTitle.value = keybindPreview(value)
                     if (AutoTextConfig.editMacro(id) { it.text = value }) syncRegistry()
                 },
                 visualizer = TextVisualizer::class.java
-            ).metadata("placeholder", "Message or /command"),
+            ).metadata("placeholder", "autotext.macro.text.placeholder"),
             delivery = functional(
-                "delivery", "When pressed", "Send it right away, or put it in the chat box so you can check it and press Enter.", MacroDelivery::class.java,
+                "delivery", null, null, MacroDelivery::class.java,
                 getter = { current(id)?.delivery ?: MacroDelivery.SEND },
                 setter = { delivery ->
                     if (AutoTextConfig.editMacro(id) { it.delivery = delivery }) syncRegistry()
                 },
                 visualizer = DropdownVisualizer::class.java
-            ).metadata("options", arrayOf("Send immediately", "Prefill chat")),
+            ).metadata("options", arrayOf("autotext.macro.delivery.send", "autotext.macro.delivery.prefill").map { Platform.i18n().translateString(it) }.toTypedArray()),
             keybind = functional(
-                "keybind_${nodeId(id)}", liveKeybindTitle, "Runs this macro once per press.",
+                "keybind_${nodeId(id)}", liveKeybindTitle, "autotext.macro.keybind.description",
                 OneConfigKeybind::class.java,
                 getter = { editorBind },
                 setter = { bind ->
@@ -163,30 +139,6 @@ internal object MacroEditorTree {
         if (visualizer != null) addMetadata("visualizer", visualizer)
     }
 
-    private fun action(
-        id: String,
-        title: String,
-        description: String,
-        text: String,
-        icon: String? = null,
-        run: () -> Unit
-    ): Property<Void> = Properties.dummy(id, title, description).apply {
-        addMetadata("visualizer", ButtonVisualizer::class.java)
-        addMetadata("text", text)
-        if (icon != null) addMetadata("icon", icon)
-        addMetadata("runnable", Runnable { run() })
-    }
-
-    private fun info(
-        id: String,
-        title: String,
-        description: String,
-        type: String = "error"
-    ): Property<Void> = Properties.dummy(id, title, description).apply {
-        addMetadata("visualizer", InfoVisualizer::class.java)
-        addMetadata("type", type)
-    }
-
     private fun <T : Property<*>> T.metadata(key: String, value: Any): T = apply { addMetadata(key, value) }
 
     private fun MacroBinding.toOneConfigKeybind(): OneConfigKeybind = OneConfigKeybind(
@@ -206,11 +158,13 @@ internal object MacroEditorTree {
     private fun nodeId(id: String): String =
         "macro_${UUID.nameUUIDFromBytes(id.toByteArray(StandardCharsets.UTF_8)).toString().replace("-", "")}"
 
-    private fun keybindTitle(text: String): String =
-        "Keybind: ${Regex("\\s+").replace(text.trim(), " ").take(40).ifBlank { "Empty macro" }}"
+    private fun keybindPreview(text: String): String = Regex("\\s+").replace(text.trim(), " ").take(40)
 
     private class LiveText(initial: String) : ComponentLike {
         var value by mutableStateOf(initial)
-        override fun asComponent(): Component = Component.text(value)
+        override fun asComponent(): Component = Component.translatable(
+            "autotext.macro.keybind",
+            if (value.isBlank()) Component.translatable("autotext.macro.untitled") else Component.text(value),
+        )
     }
 }

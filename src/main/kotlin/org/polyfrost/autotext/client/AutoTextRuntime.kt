@@ -6,7 +6,6 @@ import net.minecraft.client.Minecraft
 import org.polyfrost.autotext.core.*
 import org.polyfrost.oneconfig.api.event.v1.eventHandler
 import org.polyfrost.oneconfig.api.event.v1.events.MouseInputEvent
-import org.polyfrost.oneconfig.api.notifications.v1.Notifications
 import org.polyfrost.oneconfig.api.platform.v1.Platform
 import org.polyfrost.oneconfig.api.ui.v1.keybind.KeybindManager
 import org.polyfrost.oneconfig.api.ui.v1.keybind.OneConfigKeybind
@@ -16,7 +15,6 @@ object AutoTextRuntime {
     private val registered = LinkedHashMap<String, OneConfigKeybind>()
     private var conflictingIds: Set<String> = emptySet()
     private val refreshQueued = AtomicBoolean(false)
-    private var lastBlockedNoticeAt = 0L
     private var observedRevision = Long.MIN_VALUE
     private var registrationEpoch = 0L
     private var reconciledDownKeysCache: Set<Int>? = null
@@ -116,10 +114,7 @@ object AutoTextRuntime {
             refreshBindingsNow()
             return
         }
-        if (id in conflictingIds) {
-            notifyBlocked(TriggerResult.CONFLICTING_BIND)
-            return
-        }
+        if (id in conflictingIds) return
         val macro = AutoTextConfig.runtimeMacro(id) ?: return
         if (macro.binding.fingerprint() != expectedBinding) return
         if (callbackEpoch != registrationEpoch || AutoTextConfig.runtimeRevision() != observedRevision) {
@@ -140,20 +135,7 @@ object AutoTextRuntime {
             Platform.screen().current<Any>() != null,
             ServerPolicy.blocksImmediateSend(brand),
         )
-        notifyBlocked(executor.trigger(macro, context, AutoTextConfig.enabled, id in conflictingIds))
-    }
-
-    private fun notifyBlocked(result: TriggerResult) {
-        val message = when (result) {
-            TriggerResult.BLOCKED_SERVER -> "Sending chat messages immediately is disabled on this server. Use Prefill instead."
-            TriggerResult.INVALID -> "This macro has no valid message or command."
-            TriggerResult.CONFLICTING_BIND -> "Two enabled macros use the same keybind."
-            else -> return
-        }
-        val now = System.currentTimeMillis()
-        if (now - lastBlockedNoticeAt < 2000L) return
-        lastBlockedNoticeAt = now
-        Notifications.info("Auto Text action blocked", message)
+        executor.trigger(macro, context, AutoTextConfig.enabled, id in conflictingIds)
     }
 
     private fun findConflicts(macros: List<MacroDefinition>): Set<String> {

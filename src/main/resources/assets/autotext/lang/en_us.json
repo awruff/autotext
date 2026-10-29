@@ -1,5 +1,20 @@
 {
   "autotext.name": "Auto Text",
-  "autotext.command.open": "Open Auto Text settings"
+  "autotext.command.open": "Open Auto Text settings",
+  "autotext.enabled": "Enabled",
+  "autotext.enabled.description": "Turn all macros on or off.",
+  "autotext.macros": "Macros",
+  "autotext.macros.description": "Send a message or run a /command with a keybind.",
+  "autotext.macros.new": "New",
+  "autotext.macros.limit": "Delete a macro to add another.",
+  "autotext.macros.empty": "No macros yet",
+  "autotext.macros.empty.description": "Click New to add one.",
+  "autotext.macro.text.placeholder": "Message or /command",
+  "autotext.macro.delivery.send": "Send immediately",
+  "autotext.macro.delivery.prefill": "Prefill chat",
+  "autotext.macro.keybind": "Keybind: %s",
+  "autotext.macro.keybind.description": "Runs this macro once per press.",
+  "autotext.macro.untitled": "Empty macro",
+  "autotext.macro.duplicate": "Duplicate",
+  "autotext.macro.delete": "Delete"
 }
-

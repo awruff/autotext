@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import net.kyori.adventure.text.Component
 import org.polyfrost.autotext.core.MacroDelivery
 import org.polyfrost.oneconfig.api.config.v1.Property
 import org.polyfrost.oneconfig.api.config.v1.Visualizer
@@ -112,9 +113,9 @@ internal object MacroList : SettingRowDecorator() {
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Macros", Modifier, theme.textColor, 15.sp, FontWeight.Medium)
+                    Text(Component.translatable("autotext.macros"), Modifier, theme.textColor, 15.sp, FontWeight.Medium)
                     Text(
-                        "Each macro sends a chat message, or runs a command if it starts with /.",
+                        Component.translatable("autotext.macros.description"),
                         Modifier, theme.textColorSecondary, 13.sp,
                     )
                 }
@@ -154,14 +155,14 @@ internal object MacroList : SettingRowDecorator() {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon("plus", foreground, Modifier.size(14.dp))
-                Text("New", Modifier, foreground, 13.sp, FontWeight.Medium)
+                Text(Component.translatable("autotext.macros.new"), Modifier, foreground, 13.sp, FontWeight.Medium)
             }
         }
         if (enabled) {
             button()
         } else {
             Tooltip(
-                text = { Text("Delete a macro to add another.", Modifier, theme.textColor, 12.sp) },
+                text = { Text(Component.translatable("autotext.macros.limit"), Modifier, theme.textColor, 12.sp) },
                 modifier = Modifier.widthIn(max = 200.dp),
                 anchor = Alignment.TopCenter,
                 content = button,
@@ -182,9 +183,9 @@ internal object MacroList : SettingRowDecorator() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("No macros yet", Modifier, theme.textColor, 14.sp, FontWeight.Medium)
+            Text(Component.translatable("autotext.macros.empty"), Modifier, theme.textColor, 14.sp, FontWeight.Medium)
             Text(
-                "Add one to send a message or command with a single key press.",
+                Component.translatable("autotext.macros.empty.description"),
                 Modifier, theme.textColorSecondary, 13.sp,
             )
         }
@@ -298,10 +299,10 @@ internal object MacroList : SettingRowDecorator() {
                 Embedded(row.delivery, Modifier.width(170.dp))
                 Embedded(row.keybind, Modifier.width(150.dp))
             }
-            RowAction("copy", "Duplicate", canDuplicate) {
+            RowAction("copy", "autotext.macro.duplicate", canDuplicate) {
                 if (AutoTextConfig.duplicateMacro(row.id) != null) MacroEditorTree.syncRegistry()
             }
-            RowAction("trash", "Delete", true, DELETE, DELETE_HOVER) {
+            RowAction("trash", "autotext.macro.delete", true, DELETE, DELETE_HOVER) {
                 if (AutoTextConfig.deleteMacro(row.id)) MacroEditorTree.syncRegistry()
             }
         }
@@ -339,7 +340,7 @@ internal object MacroList : SettingRowDecorator() {
         onClick: () -> Unit,
     ) {
         Tooltip(
-            text = { Text(label, Modifier, OneConfigTheme.current.textColor, 12.sp) },
+            text = { Text(Component.translatable(label), Modifier, OneConfigTheme.current.textColor, 12.sp) },
             modifier = Modifier.widthIn(max = 160.dp),
             anchor = Alignment.TopCenter,
         ) {
