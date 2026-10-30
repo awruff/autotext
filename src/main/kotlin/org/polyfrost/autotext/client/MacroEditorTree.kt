@@ -16,7 +16,6 @@ import org.polyfrost.oneconfig.api.config.v1.Visualizer.DropdownVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.KeybindVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.SwitchVisualizer
 import org.polyfrost.oneconfig.api.config.v1.Visualizer.TextVisualizer
-import org.polyfrost.oneconfig.api.platform.v1.Platform
 import org.polyfrost.oneconfig.api.ui.v1.keybind.OneConfigKeybind
 import org.polyfrost.oneconfig.internal.ui.api.ConfigRegistry
 import org.polyfrost.oneconfig.internal.ui.api.ConfigSource
@@ -108,7 +107,7 @@ internal object MacroEditorTree {
                     if (AutoTextConfig.editMacro(id) { it.delivery = delivery }) syncRegistry()
                 },
                 visualizer = DropdownVisualizer::class.java
-            ).metadata("options", arrayOf("autotext.macro.delivery.send", "autotext.macro.delivery.prefill").map { Platform.i18n().translateString(it) }.toTypedArray()),
+            ).metadata("options", arrayOf("autotext.macro.delivery.send", "autotext.macro.delivery.prefill")),
             keybind = functional(
                 "keybind_${nodeId(id)}", liveKeybindTitle, "autotext.macro.keybind.description",
                 OneConfigKeybind::class.java,
